@@ -14,7 +14,7 @@ import {IAxelarGasService} from "@axelar-gmp-sdk-solidity/contracts/interfaces/I
 import {AxelarExecutable} from "@axelar-gmp-sdk-solidity/contracts/executable/AxelarExecutable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract MyGovernor is
+contract InterchainGovernor is
     Governor,
     GovernorCountingSimple,
     GovernorVotes,
@@ -32,18 +32,23 @@ contract MyGovernor is
     IAxelarGasService public gasService;
 
     constructor(
+        string[] memory chainIds,
+        string[] memory councils_,
         string memory name,
-        IAxelarGateway _gateway,
-        IAxelarGasService _gasService,
+        address gateway_,
+        IAxelarGasService gasService_,
         IVotes _token,
         TimelockController _timelock
-    ) Governor(name) GovernorVotes(_token) GovernorVotesQuorumFraction(4) GovernorTimelockControl(_timelock) Ownable(msg.sender) {
-        gateway = _gateway;
-        gasService = _gasService;
+    ) AxelarExecutable(gateway_) Governor(name) GovernorVotes(_token) GovernorVotesQuorumFraction(4) GovernorTimelockControl(_timelock) Ownable(msg.sender) {
+        gasService = gasService_;
+        setCouncil(chainIds, councils_);
     }
 
-    function setCouncil(uint256 chainId, address council) public onlyOwner {
-        councils[chainId] = council;
+    function setCouncil(string[] memory chainIds, string[] memory councils_) public onlyOwner {
+        require(chainIds.length == councils_.length, "Invalid council length");
+        for (uint256 i = 0; i < chainIds.length; i++) {
+            councils.push(Council(chainIds[i], councils_[i]));
+        }
     }
 
     function removeCouncil(uint256 chainId) public onlyOwner {
@@ -67,7 +72,7 @@ contract MyGovernor is
         uint256[] memory values,
         bytes[] memory calldatas,
         string memory description
-    ) public override(Governor) returns (uint256 proposalId) {
+    ) public override returns (uint256 proposalId) {
         proposalId = super.propose(targets, values, calldatas, description);
 
         bytes memory encoded = abi.encodePacked(this.propose.selector, abi.encode(targets, values, calldatas, description));
@@ -77,10 +82,15 @@ contract MyGovernor is
         }
     }
 
-    function execute(uint256 proposalId) public override(Governor) {
-        super.execute(proposalId);
+    function execute(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        bytes32 descriptionHash
+    ) public payable override(Governor) returns (uint256 proposalId) {
+        proposalId = super.execute(targets, values, calldatas, descriptionHash);
 
-        bytes memory encoded = abi.encodePacked(this.execute.selector, abi.encode(proposalId));
+        bytes memory encoded = abi.encodePacked(Governor.execute.selector, abi.encode(targets, values, calldatas, descriptionHash));
         for (uint256 i = 0; i < councils.length; i++) {
             Council memory council = councils[i];
             gateway.callContract(council.chainId, council.addr, encoded);
@@ -136,6 +146,7 @@ contract MyGovernor is
     ) internal override(AxelarExecutable) {
         // TODO: Implement guard for parent only execution
 
-        address(this).staticcall(payload_);
+        (bool ok, ) = address(this).staticcall(payload_);
+        require(ok, "InterchainGovernor: execution failed");
     }
 }
