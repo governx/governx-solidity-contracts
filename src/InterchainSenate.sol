@@ -1,77 +1,68 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
-import {GovernorCountingSimple} from "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
-import {GovernorVotes} from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
-import {GovernorVotesQuorumFraction} from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
-import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
-import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
-import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
-import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
+//import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
+//import {GovernorCountingSimple} from "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
+//import {GovernorVotes} from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
+//import {GovernorVotesQuorumFraction} from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
+//import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
+//import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+//import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
+//import {IERC165} from "@openzeppelin/contracts/interfaces/IERC165.sol";
 import {IAxelarGateway} from "@axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGateway.sol";
 import {IAxelarGasService} from "@axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGasService.sol";
 import {AxelarExecutable} from "@axelar-gmp-sdk-solidity/contracts/executable/AxelarExecutable.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+//import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract InterchainGovernor is
-    Governor,
-    GovernorCountingSimple,
-    GovernorVotes,
-    GovernorVotesQuorumFraction,
-    GovernorTimelockControl,
-    AxelarExecutable,
-    Ownable
+contract InterchainSenate is
+    AxelarExecutable
 {
-    struct Council {
-        string chainId;
+    struct Governor {
+        string chainID;
         string addr;
     }
 
-    struct Parent {
-        string chainId;
-        string addr;
+    struct InterchainProposal {
+        uint256 proposalId;
+        address[] targets;
+        uint256[] values;
+        bytes[] calldatas;
+        string description;
     }
 
-    Council[] public councils;
+    string public capitalChainID;
+    Governor[] public governors;
     IAxelarGasService public gasService;
-    bool public isChild;
-    Parent public parent;
+    address public governorFactory;
+
+    mapping (int64 proposalId => bytes) public proposalData;
 
     constructor(
-        string[] memory chainIds,
-        string[] memory councils_,
-        string memory name,
+        string memory capitalChainID_,
+        string[] memory chainIDs,
+        string[] memory addresses,
         address gateway_,
         IAxelarGasService gasService_,
-        IVotes _token,
-        TimelockController _timelock
-    ) AxelarExecutable(gateway_) Governor(name) GovernorVotes(_token) GovernorVotesQuorumFraction(4) GovernorTimelockControl(_timelock) Ownable(msg.sender) {
+        address governorFactory_
+    ) AxelarExecutable(gateway_) {
         gasService = gasService_;
-        setCouncil(chainIds, councils_);
-    }
-
-    function setCouncil(string[] memory chainIds, string[] memory councils_) public onlyOwner {
-        require(chainIds.length == councils_.length, "Invalid council length");
-        for (uint256 i = 0; i < chainIds.length; i++) {
-            councils.push(Council(chainIds[i], councils_[i]));
+        governorFactory = governorFactory_;
+        require(chainIDs.length == addresses.length, "Invalid chainIDs length");
+        for (uint256 i = 0; i < chainIDs.length; i++) {
+            governors.push(Governor(chainIDs[i], addresses[i]));
         }
     }
 
-    function removeCouncil(uint256 chainId) public onlyOwner {
-        delete councils[chainId];
+    function setGovernor(string[] memory chainIDs, string[] memory councils_) public {
+        require(chainIDs.length == councils_.length, "Invalid council length");
+        require(msg.sender == governorFactory, "caller not allowed");
+        for (uint256 i = 0; i < chainIDs.length; i++) {
+            governors.push(Governor(chainIDs[i], councils_[i]));
+        }
     }
 
-    function votingDelay() public pure override returns (uint256) {
-        return 7200; // 1 day
-    }
-
-    function votingPeriod() public pure override returns (uint256) {
-        return 50400; // 1 week
-    }
-
-    function proposalThreshold() public pure override returns (uint256) {
-        return 0;
+    function removeGovernor(uint256 chainID) public {
+        delete governors[chainID];
     }
 
     function propose(
